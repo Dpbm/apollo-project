@@ -33,3 +33,6 @@
 - [https://medium.com/@mihirsaurkar/from-theory-to-practice-implementing-multi-class-classification-with-knn-sklearn-2d85f9adc5f7](https://medium.com/@mihirsaurkar/from-theory-to-practice-implementing-multi-class-classification-with-knn-sklearn-2d85f9adc5f7)
 - [https://www.geeksforgeeks.org/machine-learning/multiclass-receiver-operating-characteristic-roc-in-scikit-learn/](https://www.geeksforgeeks.org/machine-learning/multiclass-receiver-operating-characteristic-roc-in-scikit-learn/)
 - [https://lightning.ai/docs/torchmetrics/stable/classification/auroc.html](https://lightning.ai/docs/torchmetrics/stable/classification/auroc.html)
+- [https://stackoverflow.com/questions/47876999/how-to-compute-average-roc-for-cross-validated-for-multiclass](https://stackoverflow.com/questions/47876999/how-to-compute-average-roc-for-cross-validated-for-multiclass)
+- [https://cursos.alura.com.br/forum/topico-sobre-stratifiedkfold-178613](https://cursos.alura.com.br/forum/topico-sobre-stratifiedkfold-178613)
+- [https://scikit-learn.org/stable/auto_examples/model_selection/plot_roc.html](https://scikit-learn.org/stable/auto_examples/model_selection/plot_roc.html)
