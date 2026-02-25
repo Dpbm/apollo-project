@@ -20,14 +20,23 @@ if file is not None:
     st.dataframe(df)
 
     st.subheader("Overall Data Statistics", divider=True)
-
-    table_data = {}
-    for key,value in statistics.items():
-        if("amount" in key):
-            continue
-        table_data[key] = str(value)
-
+    table_data = {
+            "Total Images": statistics["total_images"],
+            "Total Syndromes": statistics["total_syndromes"],
+            "Total Subjects": statistics["total_subjects"],
+    }
     st.table(table_data)
+    
+    st.subheader("Embeddings Values", divider=True)
+    st.caption("This section show how the embedding values are distributed.")
+    for col_sufix, type_col in [("_min_value","Min"), ("_max_value", "Max")]:
+        row = st.container(horizontal=True)
+        with row:
+            col1,col2,col3,col4 = st.columns(4)
+            col1.metric(f"Min {type_col} Value", statistics["min"+col_sufix], None, border=True)
+            col2.metric(f"Avg {type_col} Value", statistics["avg"+col_sufix], None, border=True)
+            col3.metric(f"Median {type_col} Value", statistics["median"+col_sufix], None, border=True)
+            col4.metric(f"Max {type_col} Value", statistics["max"+col_sufix], None, border=True)
 
     st.subheader("Amount of Images per Syndrome", divider=True)
     st.table(statistics["syndromes_amount_of_images"], border="horizontal")
