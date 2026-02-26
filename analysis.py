@@ -26,7 +26,7 @@ OPTIONS_INIT = ('pca', 'random')
 DEFAULT_INIT_INDEX = 0
 DEFAULT_INIT = OPTIONS_INIT[DEFAULT_INIT_INDEX]
 
-type InitType = 'pca'|'random'
+type InitType = 'pca'|'random' # type: ignore
 
 type Dataset = Dict[Any,Any]
 
@@ -66,6 +66,8 @@ def generate_df(dataset:Dataset) -> pd.DataFrame:
           image = dataset[syndrome][subject][image_id]
           mapping.loc[index] = {"syndrome":syndrome, "subject":subject, "image":image_id, "image_size":len(image), "max_value":max(image), "min_value":min(image)}
           index += 1
+
+    assert len(mapping.syndrome.unique()) >= 3, "You must have at least 3 different syndromes!"
 
     return mapping
 
@@ -140,13 +142,11 @@ def generate_t_sne(
     ) -> np.ndarray:
     """Reduce dimensions from dataset using t-SNE."""
 
-    import os
-
     from sklearn.manifold import TSNE
     from sklearn.preprocessing import normalize
 
-    n_cpus = os.cpu_count()
-    n_jobs = 1 if n_cpus < 4 else 4
+    from constants import MAX_JOBS,RANDOM_STATE
+
 
     tsne = TSNE(
             n_components=2, 
@@ -155,8 +155,8 @@ def generate_t_sne(
             perplexity=perplexity, 
             early_exaggeration=exaggeration,
             max_iter=max_iter,
-            n_jobs=n_jobs,
-            random_state=42
+            n_jobs=MAX_JOBS,
+            random_state=RANDOM_STATE
             )
     data_arr_normalized = normalize(data,'l2',axis=0)
     return tsne.fit_transform(data_arr_normalized)
