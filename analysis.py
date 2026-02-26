@@ -22,6 +22,12 @@ MIN_LEARNING_RATE = 10.0
 MAX_LEARNING_RATE = 1000.0
 DEFAULT_LEARNING_RATE = 800.0
 
+OPTIONS_INIT = ('pca', 'random')
+DEFAULT_INIT_INDEX = 0
+DEFAULT_INIT = OPTIONS_INIT[DEFAULT_INIT_INDEX]
+
+type InitType = 'pca'|'random'
+
 type Dataset = Dict[Any,Any]
 
 class Statistics(TypedDict):
@@ -129,7 +135,8 @@ def generate_t_sne(
         perplexity:float=DEFAULT_PERPLEXITY,
         exaggeration:float=DEFAULT_EXAGGERATION,
         max_iter:int=DEFAULT_MAX_ITER,
-        learning_rate:float=DEFAULT_LEARNING_RATE
+        learning_rate:float=DEFAULT_LEARNING_RATE,
+        init:InitType=DEFAULT_INIT
     ) -> np.ndarray:
     """Reduce dimensions from dataset using t-SNE."""
 
@@ -144,7 +151,7 @@ def generate_t_sne(
     tsne = TSNE(
             n_components=2, 
             learning_rate=learning_rate, 
-            init='pca', 
+            init=init, 
             perplexity=perplexity, 
             early_exaggeration=exaggeration,
             max_iter=max_iter,
