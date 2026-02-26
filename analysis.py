@@ -6,6 +6,22 @@ from io import BytesIO
 import pandas as pd
 import numpy as np
 
+MIN_PERPLEXITY = 5.0
+MAX_PERPLEXITY = 50.0
+DEFAULT_PERPLEXITY = 50.0
+
+MIN_EXAGGERATION = 4.0
+MAX_EXAGGERATION = 100.0
+DEFAULT_EXAGGERATION = 12.0
+
+MIN_MAX_ITER = 100
+MAX_MAX_ITER = 6000
+DEFAULT_MAX_ITER = 1000
+
+MIN_LEARNING_RATE = 10.0
+MAX_LEARNING_RATE = 1000.0
+DEFAULT_LEARNING_RATE = 800.0
+
 type Dataset = Dict[Any,Any]
 
 class Statistics(TypedDict):
@@ -96,16 +112,45 @@ def get_overall_statistics(df:pd.DataFrame) -> Statistics:
 def generate_array_from_embeddings(dataset:Dataset, df:pd.DataFrame) -> np.ndarray:
     """Generate an easier to handle data structure for those images."""
 
-    total_images = mapping.shape[0]
+    total_images = df.shape[0]
     max_img_size = df.image_size.max()
 
     data_arr = np.ndarray((total_images,max_img_size), dtype=np.float32)
 
-    for i,row in mapping.iterrows():
+    for i,row in df.iterrows():
       syndrome,subject,image_i = row["syndrome"],row["subject"],row["image"]
       image = dataset[syndrome][subject][image_i]
       data_arr[i] = np.nan_to_num(image)
 
     return data_arr
 
+def generate_t_sne(
+        data:np.ndarray,
+        perplexity:float=DEFAULT_PERPLEXITY,
+        exaggeration:float=DEFAULT_EXAGGERATION,
+        max_iter:int=DEFAULT_MAX_ITER,
+        learning_rate:float=DEFAULT_LEARNING_RATE
+    ) -> np.ndarray:
+    """Reduce dimensions from dataset using t-SNE."""
+
+    import os
+
+    from sklearn.manifold import TSNE
+    from sklearn.preprocessing import normalize
+
+    n_cpus = os.cpu_count()
+    n_jobs = 1 if n_cpus < 4 else 4
+
+    tsne = TSNE(
+            n_components=2, 
+            learning_rate=learning_rate, 
+            init='pca', 
+            perplexity=perplexity, 
+            early_exaggeration=exaggeration,
+            max_iter=max_iter,
+            n_jobs=n_jobs,
+            random_state=42
+            )
+    data_arr_normalized = normalize(data,'l2',axis=0)
+    return tsne.fit_transform(data_arr_normalized)
 
