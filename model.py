@@ -233,7 +233,7 @@ class Model:
             precision=precision_score(y, y_pred, average="micro"),
             recall=recall_score(y, y_pred, average="micro"),
             top_k=top_k_accuracy_score(y, y_pred_matrix, labels=classes),
-            roc_auc=roc_auc_score(y, y_pred_matrix, multi_class="ovr"),
+            roc_auc=roc_auc_score(y, y_pred_matrix, multi_class="ovr",labels=classes),
             tpr=tprs,
             fpr=fprs,
             auc=aucs
