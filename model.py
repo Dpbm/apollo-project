@@ -103,7 +103,12 @@ class Model:
         """Setup model object."""
 
         self._folds = folds
-        self._X_train, self._X_test, self._y_train, self._y_test = train_test_split(X,y,test_size=0.2, random_state=42)
+        self._X_train, self._X_test, self._y_train, self._y_test = train_test_split(
+                                                                    X,
+                                                                    y,
+                                                                    test_size=0.2, 
+                                                                    random_state=42,
+                                                                    stratify=y)
         self._train_size = self._y_train.shape[0]
         self._test_size = self._y_test.shape[0]
         self._train_proportion_syndromes = self._y_train.value_counts().to_dict()
