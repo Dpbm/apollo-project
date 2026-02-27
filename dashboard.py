@@ -2,7 +2,6 @@
 
 import io
 import logging
-from typing import Dict
 
 import streamlit as st
 import plotly.express as px
