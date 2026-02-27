@@ -7,7 +7,6 @@ from typing import Dict
 import streamlit as st
 import plotly.express as px
 import pandas as pd
-import numpy as np
 
 from analysis import (
         load_pickle, 
@@ -74,21 +73,32 @@ def get_numerables_per_fold(metrics:ModelOutputMetrics) -> pd.DataFrame:
 
     return df
 
-def roc_to_df_for_overall(metrics:ModelOutputMetrics, knn_metric:KNNMetric) -> pd.DataFrame:
+def roc_to_df_for_overall(metrics:ModelOutputMetrics) -> pd.DataFrame:
     """Create a df for plotting roc-auc for overall."""
     df = None
-    for col in ["auc", "fpr", "tpr"]:
-        data = metrics[knn_metric]["overall"][col]
-        tmp_df = pd.DataFrame({
-            "class":list(data.keys()),
-            col: list(data.values())
-        })
+    for knn_metric in OPTIONS_METRICS:
+        
+        inter_metric_df = None
+        for col in ["auc", "fpr", "tpr"]:
+            data = metrics[knn_metric]["overall"][col]
+            tmp_df = pd.DataFrame({
+                "class":list(data.keys()),
+                col: list(data.values())
+            })
+            tmp_df["metric"] = knn_metric
 
-        if(df is None):
-            df = tmp_df.copy()
+            if inter_metric_df is None:
+                inter_metric_df = tmp_df.copy()
+                continue
+            
+            inter_metric_df = pd.merge(inter_metric_df, tmp_df, on="class")
+        
+        if df is None:
+            df = inter_metric_df.copy()
             continue
 
-        df = pd.merge(df, tmp_df, on="class")
+        df = pd.concat([df, inter_metric_df], ignore_index=True)
+    
     
     df = df.explode(["fpr", "tpr"])
     df["fpr"] = pd.to_numeric(df["fpr"], errors="coerce")
@@ -99,16 +109,28 @@ def roc_to_df_for_overall(metrics:ModelOutputMetrics, knn_metric:KNNMetric) -> p
 
     return df
 
-def roc_to_df_for_mean(metrics:ModelOutputMetrics, knn_metric:KNNMetric) -> pd.DataFrame:
+def roc_to_df_for_mean(metrics:ModelOutputMetrics) -> pd.DataFrame:
     """Create a df for plotting roc-auc per fold mean."""
-    data = metrics[knn_metric]["mean_roc"]
-    fpr = metrics[knn_metric]["fprs_grid"]
-    df = pd.DataFrame({
-        "class": list(data.keys()),
-        "auc": [value["auc"] for value in data.values()],
-        "tpr":[value["tpr"] for value in data.values()],
-        "fpr": [fpr  for _ in data.values()],
-    })
+
+    df = None
+
+    for knn_metric in OPTIONS_METRICS:
+        data = metrics[knn_metric]["mean_roc"]
+        fpr = metrics[knn_metric]["fprs_grid"]
+        tmp = pd.DataFrame({
+            "class": list(data.keys()),
+            "auc": [value["auc"] for value in data.values()],
+            "tpr":[value["tpr"] for value in data.values()],
+            "fpr": [fpr  for _ in data.values()],
+        })
+        tmp["metric"] = knn_metric
+
+        if df is None:
+            df=tmp.copy()
+            continue
+
+        df = pd.concat([df,tmp],ignore_index=True)
+            
     
     df = df.explode(["fpr", "tpr"])
     df["fpr"] = pd.to_numeric(df["fpr"], errors="coerce")
@@ -116,29 +138,47 @@ def roc_to_df_for_mean(metrics:ModelOutputMetrics, knn_metric:KNNMetric) -> pd.D
     df = df.dropna()
     df = df.sort_values(["class", "fpr"])
     return df
-    
+
+
 
 if __name__ == "__main__":
-    st.image(BANNER_IMAGE, caption="Company banner")
+    st.image(BANNER_IMAGE)
     st.title("Genetic Syndrome statistics visualizer and Predictor")
-    file = st.file_uploader("Upload Embeddings Pickle", type="p", accept_multiple_files=False, help="Insert the embeddings pickle file that has extension .p")
+    st.space(size="small")
+
+    file = st.file_uploader(
+        "Upload Embeddings Pickle", 
+        type="p", 
+        accept_multiple_files=False, 
+        help="Insert the embeddings pickle file that has extension .p",
+        key="file")
+    
+    st.space(size="small")
+
+    
+    # this is a workaround since json, for some reason, doesn't disappear after inserting a file
+    if file is None:
+        st.write("Add your pickle file to proceed with your analysis and model training! Make sure your data inside is a dictionary that follows this format:")
+    instruction_container = st.empty()
 
     if file is None:
-        st.write("Add your pickle file to proceed with your analysis and model training!")
-        st.write("Make sure your data inside is a dictionary that follows this format:")
-        st.json({
-            'syndrome_id': {
-                'subject_id': {
-                    'image_id': '[320-dimensional embedding ndarray]'
+        with instruction_container:
+            st.json({
+                'syndrome_id': {
+                    'subject_id': {
+                        'image_id': '[320-dimensional embedding ndarray]'
+                        }
                     }
-                }
-            })
+                })
     else:
+        instruction_container.empty() # clear the json
+
         # all data
         failed = False
         exception = None
         with st.status("Processing data..."):
             try:
+
                 st.write("Loading pickle file..")
                 dataset = load_pickle(io.BytesIO(file.getvalue()))
 
@@ -191,6 +231,11 @@ if __name__ == "__main__":
                 st.write("Evaluating model...")
                 model.run_evaluation()
 
+                st.write("Parsing metrics...")
+                roc_mean = roc_to_df_for_mean(model.metrics)
+                roc_overall = roc_to_df_for_overall(model.metrics)
+                final_model_numerable_metrics = only_numberable_metrics_for_overall(model.metrics)
+
 
             except Exception as error:
                 logger.error(f"Failed on load data: {error}")
@@ -201,28 +246,31 @@ if __name__ == "__main__":
         if failed:
             st.error('An error occurred during processing. Please, try again with a different file!', icon="🚨")
             st.exception(Exception("No Exception found!") if exception is None else exception)
-            exit()
+            st.stop()
+
+        st.space(size="small")
 
         tab1, tab2 = st.tabs(
                 [":chart: Analysis", ":robot: Model"], default=":chart: Analysis"
             )
+
         
         with tab1:
 
-            st.write(f"Using file: {file.name}")
-            st.space(size="small")
-            
+            # -------------SHOW DF---------------------------
             st.header("Data Analysis and visualization", divider=True)
             st.dataframe(df)
             st.caption("Extracted data from dataset pickle file. This dataframe holds the main characteristics from images and their classes.")
 
+            # -------------OVERALL STATISTICS---------------------------
             table_data = {
                     "Total Images": statistics["total_images"],
                     "Total Syndromes": statistics["total_syndromes"],
                     "Total Subjects": statistics["total_subjects"],
             }
             st.table(table_data)
-            
+
+            #------------AMOUNT OF DATA-------------------------------
             fig = px.line(
                     grouped_statistics,
                     x="syndrome",
@@ -254,9 +302,7 @@ if __name__ == "__main__":
             fig.update_xaxes(type="category")
             st.plotly_chart(fig)
 
-            
-            
-
+            # -------------Embeddings Info---------------------------
             st.subheader("Embedding Values")
             for col_sufix, type_col in [("_min_value","Min"), ("_max_value", "Max")]:
                 row = st.container(horizontal=True)
@@ -285,14 +331,17 @@ if __name__ == "__main__":
 
             st.divider()
 
-
+            # -------------TSNE---------------------------
             fig = px.scatter(
-                    plot_data,
-                    x="x",
-                    y="y",
-                    color="label",
-                    hover_name="label"
+                        plot_data,
+                        x="x",
+                        y="y",
+                        color="label",
+                        hover_name="label"
                     )
+            fig.update_xaxes(showticklabels=False, visible=False)
+            fig.update_yaxes(showticklabels=False, visible=False)
+
 
             col1, col2 = st.columns(2)
             with col1:
@@ -308,58 +357,57 @@ if __name__ == "__main__":
                 st.slider("Learning Rate", MIN_LEARNING_RATE, MAX_LEARNING_RATE, DEFAULT_LEARNING_RATE, key="learning_rate")
 
         with tab2:
+            total_metrics = len(OPTIONS_METRICS)
+
             st.header("Model creation", divider=True)
 
-            st.subheader("Best Parameters for each KNN metric (n_neighbors)")
-            row = st.container(horizontal=True)
-            with row:
-                cols = st.columns(len(OPTIONS_METRICS))
-                for i,metric in enumerate(OPTIONS_METRICS):
-                    cols[i].metric(metric, model.best_params[metric]["n_neighbors"], None, border=True)
+            # --------MODEL EXPLANATION--------------------------------
+            expander = st.expander("We're using KNN model - Click to Have More Info")
+            expander.write('''
+                KNN (K-Nearest Neighbors) is a supervised machine learning algorithm that classifies 
+                a new sample based on the labels of its k nearest neighbors in the feature space. It is 
+                simple, intuitive, and easy to implement. However, it can struggle with high-dimensional
+                data due to the curse of dimensionality and can be sensitive to outliers and the choice of 
+                distance metric.
+                See more at: https://en.wikipedia.org/wiki/K-nearest_neighbors_algorithm
+            ''')
 
             st.space(size="small")
 
-            st.subheader("Model Final Performance")
-            st.table(only_numberable_metrics_for_overall(model.metrics))
+            # --------PARAMETERS--------------------------------
+            st.subheader("Best Parameters for each KNN metric (n_neighbors)")
+            row = st.container(horizontal=True)
+            with row:
+                cols = st.columns(total_metrics)
+                for i,metric in enumerate(OPTIONS_METRICS):
+                    cols[i].metric(metric, model.best_params[metric]["n_neighbors"], None, border=True)
+            st.caption("We employed GridSearchCV from scikit-learn to test different combinations from 1 to 15 for both metrics.")
 
+            # --------DATA PROPORTIONS--------------------------------
+            st.subheader("Data Proportions")
             st.table({
                 "train":{**train_syndromes, "total":train_size}, 
                 "evaluation":{**test_syndromes,"total":test_size}
-                })
+            })
+            st.caption(f"""
+                       The proprotion of data used for Train and Test is shown above. During Training, 
+                       the Train data is divided into k={DEFAULT_FOLDS} folds, and the Test data is used afterwards to 
+                       evaluate the whole model.
+                       For splitting the data at the beggining, we use the function train_test_split from sklearn, with a test_size=0.2.
+                       Then, for Cross-Validation, the StratifiedKFold is used to generate the folds and split.
+                    """)
 
+
+            st.space(size="small")
+            st.divider()
+
+            st.header("Training Results (Folds data)")
+            st.subheader("Metrics results")
+
+            # --------FOLDS NUMERABLE METRICS--------------------------------
             row = st.container(horizontal=True)
             with row:
-                cols = st.columns(len(OPTIONS_METRICS))
-                for i,metric in enumerate(OPTIONS_METRICS):
-                    fig = px.imshow(
-                        model.metrics[metric]["overall"]["confusion_matrix"], 
-                        text_auto=True,
-                        x=sorted_syndromes,
-                        y=sorted_syndromes,
-                        title=f"Confusion Matrix for {metric} KNN model"
-                        )
-                    fig.update_xaxes(side="top", type="category")
-                    fig.update_yaxes(type="category")
-                    cols[i].plotly_chart(fig, use_container_width=True)
-
-            row = st.container(horizontal=True)
-            with row:
-                cols = st.columns(len(OPTIONS_METRICS))
-                for i,metric in enumerate(OPTIONS_METRICS):
-                    fig = px.imshow(
-                        model.metrics[metric]["overall"]["f1"].reshape(1, -1), 
-                        text_auto=True,
-                        x=sorted_syndromes,
-                        aspect="equal",
-                        title=f"F1 for {metric} KNN model"
-                        )
-                    fig.update_xaxes(type="category")
-                    fig.update_yaxes(showticklabels=False, visible=False)
-                    cols[i].plotly_chart(fig, use_container_width=True)
-
-            row = st.container(horizontal=True)
-            with row:
-                cols = st.columns(len(OPTIONS_METRICS))
+                cols = st.columns(total_metrics)
                 for i,metric in enumerate(OPTIONS_METRICS):
                     fig = px.line(
                         per_fold_df[per_fold_df["knn_metric"] == metric],
@@ -374,12 +422,13 @@ if __name__ == "__main__":
                     )
                     cols[i].plotly_chart(fig)
 
-            container = st.container()
+            # --------CM AND F1 FOR FOLDS--------------------------------
+            container = st.container(border=True)
             with container:
-
                 selected_fold = DEFAULT_SELECTED_FOLD if not 'fold' in st.session_state else st.session_state['fold']
                 metric = OPTIONS_METRICS[DEFAULT_METRIC_INDEX] if not 'knn_metric' in st.session_state else st.session_state['knn_metric']
 
+                # --------CM --------------------------------
                 plots_row = st.container(horizontal=True)
                 fig = px.imshow(
                         model.metrics[metric]["per_fold"][selected_fold]["confusion_matrix"], 
@@ -392,6 +441,7 @@ if __name__ == "__main__":
                 fig.update_yaxes(type="category")
                 plots_row.plotly_chart(fig, use_container_width=True)
 
+                # --------F1--------------------------------
                 fig = px.imshow(
                         model.metrics[metric]["per_fold"][selected_fold]["f1"].reshape(1, -1), 
                         text_auto=True,
@@ -403,18 +453,95 @@ if __name__ == "__main__":
                 fig.update_yaxes(showticklabels=False, visible=False)
                 plots_row.plotly_chart(fig, use_container_width=True)
 
+                # --------TWEAKS FOR THOSE CHARTS--------------------------------
                 tweaks_row = st.container(horizontal=True)
                 with tweaks_row:
                     st.select_slider("Fold index", options=list(range(DEFAULT_FOLDS)), value=DEFAULT_SELECTED_FOLD, key="fold")
                     st.selectbox("KNN Metric", options=OPTIONS_METRICS, index=DEFAULT_METRIC_INDEX, key="knn_metric")
 
+
+            # -------ROC-AUC MEAN FOR FOLDS-------------------------------
             row = st.container(horizontal=True)
             with row:
-                cols = st.columns(len(OPTIONS_METRICS))
+                cols = st.columns(total_metrics)
                 for i,metric in enumerate(OPTIONS_METRICS):
-                    roc = roc_to_df_for_overall(model.metrics, metric)
                     fig = px.line(
-                        roc,
+                            roc_mean[roc_mean["metric"] == metric],
+                            x="fpr",
+                            y="tpr",
+                            color="class",
+                            hover_name="class",
+                            hover_data={
+                                    "fpr": True,
+                                    "tpr": True,
+                                    "auc": True,
+                                    "class": True,
+                                },
+                            labels={
+                                "tpr":"TPR",
+                                "fpr":"FPR",
+                                "class":"Class"
+                            },
+                            title=f"ROC-AUC for {metric} model - mean across folds"
+                        )
+                    fig.update_xaxes(type="linear")
+                    fig.update_yaxes(type="linear")
+                    cols[i].plotly_chart(fig)
+            st.caption("""
+                        During the training, the ROC-AUC was calculcated for each fold and all labels.
+                       After that, the values were averaged and saved for later visualization.
+                    """)
+
+            st.space(size="small")
+            st.divider()
+
+
+            st.header("Final Model (After Evaluation)")
+
+            # -------Metrics-------------------------------
+            st.subheader("Metrics results")
+            st.table(final_model_numerable_metrics)
+
+
+            # -------Confusion Matrix-------------------------------
+            row = st.container(horizontal=True)
+            with row:
+                cols = st.columns(total_metrics)
+                for i,metric in enumerate(OPTIONS_METRICS):
+                    fig = px.imshow(
+                        model.metrics[metric]["overall"]["confusion_matrix"], 
+                        text_auto=True,
+                        x=sorted_syndromes,
+                        y=sorted_syndromes,
+                        title=f"Confusion Matrix for {metric} model"
+                        )
+                    fig.update_xaxes(side="top", type="category")
+                    fig.update_yaxes(type="category")
+                    cols[i].plotly_chart(fig, use_container_width=True)
+
+            # -------F1 Score-------------------------------
+            row = st.container(horizontal=True)
+            with row:
+                cols = st.columns(total_metrics)
+                for i,metric in enumerate(OPTIONS_METRICS):
+                    fig = px.imshow(
+                        model.metrics[metric]["overall"]["f1"].reshape(1, -1), 
+                        text_auto=True,
+                        x=sorted_syndromes,
+                        aspect="equal",
+                        title=f"F1 for {metric}"
+                        )
+                    fig.update_xaxes(type="category")
+                    fig.update_yaxes(showticklabels=False, visible=False)
+                    cols[i].plotly_chart(fig, use_container_width=True)
+
+            # -------ROC-AUC-------------------------------
+            row = st.container(horizontal=True)
+            with row:
+                cols = st.columns(total_metrics)
+                for i,metric in enumerate(OPTIONS_METRICS):
+                    fig = px.line(
+                        roc_overall[roc_overall["metric"] == metric],
                         x="fpr",
                         y="tpr",
                         color="class",
@@ -436,30 +563,4 @@ if __name__ == "__main__":
                     fig.update_yaxes(type="linear")
                     cols[i].plotly_chart(fig)
             
-            row = st.container(horizontal=True)
-            with row:
-                cols = st.columns(len(OPTIONS_METRICS))
-                for i,metric in enumerate(OPTIONS_METRICS):
-                    roc = roc_to_df_for_mean(model.metrics, metric)
-                    fig = px.line(
-                            roc,
-                            x="fpr",
-                            y="tpr",
-                            color="class",
-                            hover_name="class",
-                            hover_data={
-                                    "fpr": True,
-                                    "tpr": True,
-                                    "auc": True,
-                                    "class": True,
-                                },
-                            labels={
-                                "tpr":"TPR",
-                                "fpr":"FPR",
-                                "class":"Class"
-                            },
-                            title=f"ROC-AUC model {metric} mean across folds"
-                        )
-                    fig.update_xaxes(type="linear")
-                    fig.update_yaxes(type="linear")
-                    cols[i].plotly_chart(fig)
+            
