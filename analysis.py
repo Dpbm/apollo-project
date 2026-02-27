@@ -1,10 +1,17 @@
 """Do the data analysis and transformation"""
 
-from typing import Dict, Any, TypedDict
+from typing import Dict, Any, TypedDict, Tuple
 from io import BytesIO
+
+from sklearn.manifold import TSNE
+from sklearn.preprocessing import normalize
+from imblearn.under_sampling import RepeatedEditedNearestNeighbours
 
 import pandas as pd
 import numpy as np
+
+from constants import MAX_JOBS,RANDOM_STATE
+
 
 MIN_PERPLEXITY = 5.0
 MAX_PERPLEXITY = 50.0
@@ -141,13 +148,6 @@ def generate_t_sne(
         init:InitType=DEFAULT_INIT
     ) -> np.ndarray:
     """Reduce dimensions from dataset using t-SNE."""
-
-    from sklearn.manifold import TSNE
-    from sklearn.preprocessing import normalize
-
-    from constants import MAX_JOBS,RANDOM_STATE
-
-
     tsne = TSNE(
             n_components=2, 
             learning_rate=learning_rate, 
@@ -161,3 +161,34 @@ def generate_t_sne(
     data_arr_normalized = normalize(data,'l2',axis=0)
     return tsne.fit_transform(data_arr_normalized)
 
+def generate_default_t_sne(data:np.ndarray) -> np.ndarray:
+    """Reduce dimensions from dataset using t-SNE with default sklearn parameters."""
+
+    tsne = TSNE(n_components=2, n_jobs=MAX_JOBS, random_state=RANDOM_STATE)
+    data_arr_normalized = normalize(data,'l2',axis=0)
+
+    return tsne.fit_transform(data_arr_normalized)
+
+def under_sample(embeddings:np.ndarray, syndromes:pd.Series) -> Tuple[pd.Series, np.ndarray]:
+    """Uses RepeatedEditedNearestNeighbours to reduce the noisy on the data"""
+    knn = RepeatedEditedNearestNeighbours()
+
+    X_resampled, y_resampled = knn.fit_resample(embeddings,syndromes)
+    return y_resampled, X_resampled
+
+def get_syndromes_amount(syndromes:pd.Series) -> pd.DataFrame:
+   """Count the occurrences of each syndrome."""
+   return syndromes.value_counts().reset_index()
+
+def join_under_sampled_and_raw_for_comparison(under_sampled:pd.Series, raw:pd.DataFrame) -> pd.DataFrame:
+   """Join Series and Data Frame for comparison."""
+
+   under_sampled_c_syndromes_count = get_syndromes_amount(under_sampled)
+   under_sampled_c_syndromes_count["type"] = "under_sampled"
+
+   raw_c = raw.copy()
+   raw_c_syndromes_count = get_syndromes_amount(raw_c.syndrome)
+   raw_c_syndromes_count["type"] = "raw"
+
+
+   return pd.concat([under_sampled_c_syndromes_count, raw_c_syndromes_count], ignore_index=True).sort_values(by='syndrome')

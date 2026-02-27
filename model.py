@@ -278,3 +278,98 @@ class Model:
                                                                     tpr=mean_tpr
                                                                 )
                                                             
+
+
+def only_numberable_metrics_for_overall(metrics:ModelOutputMetrics) -> Dict[KNNMetric, NumerableMetrics]:
+    """
+    Parse model metrics to return a dict with only 
+    numerable metrics from overall metrics.
+    """
+    return {
+        knn_metric: {
+            metric: metrics[knn_metric]["overall"][metric] for metric in NUMERABLE_METRICS_LIST
+        } for knn_metric in OPTIONS_METRICS
+    }
+
+def get_numerables_per_fold(metrics:ModelOutputMetrics) -> pd.DataFrame:
+    """Get numerables for each fold."""
+    df = pd.DataFrame(columns=("fold", "knn_metric", *NUMERABLE_METRICS_LIST))
+
+    loc_i = 0
+    for knn_metric in OPTIONS_METRICS:
+        for fold in range(DEFAULT_FOLDS):
+            df.loc[loc_i] = {
+                "fold":fold,
+                "knn_metric": knn_metric,
+                **{metric:metrics[knn_metric]["per_fold"][fold][metric]  for metric in NUMERABLE_METRICS_LIST}
+            }
+            loc_i += 1
+
+    return df
+
+def roc_to_df_for_overall(metrics:ModelOutputMetrics) -> pd.DataFrame:
+    """Create a df for plotting roc-auc for overall."""
+    df = None
+    for knn_metric in OPTIONS_METRICS:
+        
+        inter_metric_df = None
+        for col in ["auc", "fpr", "tpr"]:
+            data = metrics[knn_metric]["overall"][col]
+            tmp_df = pd.DataFrame({
+                "class":list(data.keys()),
+                col: list(data.values())
+            })
+            tmp_df["metric"] = knn_metric
+
+            if inter_metric_df is None:
+                inter_metric_df = tmp_df.copy()
+                continue
+            
+            inter_metric_df = pd.merge(inter_metric_df, tmp_df, on="class")
+        
+        if df is None:
+            df = inter_metric_df.copy()
+            continue
+
+        df = pd.concat([df, inter_metric_df], ignore_index=True)
+    
+    
+    df = df.explode(["fpr", "tpr"])
+    df["fpr"] = pd.to_numeric(df["fpr"], errors="coerce")
+    df["tpr"] = pd.to_numeric(df["tpr"], errors="coerce")
+
+    df = df.dropna()
+    df = df.sort_values(["class", "fpr"])
+
+    return df
+
+def roc_to_df_for_mean(metrics:ModelOutputMetrics) -> pd.DataFrame:
+    """Create a df for plotting roc-auc per fold mean."""
+
+    df = None
+
+    for knn_metric in OPTIONS_METRICS:
+        data = metrics[knn_metric]["mean_roc"]
+        fpr = metrics[knn_metric]["fprs_grid"]
+        tmp = pd.DataFrame({
+            "class": list(data.keys()),
+            "auc": [value["auc"] for value in data.values()],
+            "tpr":[value["tpr"] for value in data.values()],
+            "fpr": [fpr  for _ in data.values()],
+        })
+        tmp["metric"] = knn_metric
+
+        if df is None:
+            df=tmp.copy()
+            continue
+
+        df = pd.concat([df,tmp],ignore_index=True)
+            
+    
+    df = df.explode(["fpr", "tpr"])
+    df["fpr"] = pd.to_numeric(df["fpr"], errors="coerce")
+    df["tpr"] = pd.to_numeric(df["tpr"], errors="coerce")
+    df = df.dropna()
+    df = df.sort_values(["class", "fpr"])
+    return df
+

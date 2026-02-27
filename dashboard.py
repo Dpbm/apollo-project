@@ -14,6 +14,9 @@ from analysis import (
         get_overall_statistics, 
         generate_t_sne, 
         generate_array_from_embeddings,
+        under_sample,
+        join_under_sampled_and_raw_for_comparison,
+        generate_default_t_sne,
         DEFAULT_PERPLEXITY,
         MIN_PERPLEXITY,
         MAX_PERPLEXITY,
@@ -31,115 +34,20 @@ from analysis import (
         DEFAULT_INIT_INDEX
     )
 from model import (
+        only_numberable_metrics_for_overall,
+        get_numerables_per_fold,
+        roc_to_df_for_overall,
+        roc_to_df_for_mean,
         Model, 
-        ModelOutputMetrics, 
-        KNNMetric, 
-        NumerableMetrics,
         DEFAULT_FOLDS,
         DEFAULT_SELECTED_FOLD,
         OPTIONS_METRICS,
         DEFAULT_METRIC_INDEX,
-        NUMERABLE_METRICS_LIST
     )
 from constants import BANNER_IMAGE
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.ERROR)
-
-def only_numberable_metrics_for_overall(metrics:ModelOutputMetrics) -> Dict[KNNMetric, NumerableMetrics]:
-    """
-    Parse model metrics to return a dict with only 
-    numerable metrics from overall metrics.
-    """
-    return {
-        knn_metric: {
-            metric: metrics[knn_metric]["overall"][metric] for metric in NUMERABLE_METRICS_LIST
-        } for knn_metric in OPTIONS_METRICS
-    }
-
-def get_numerables_per_fold(metrics:ModelOutputMetrics) -> pd.DataFrame:
-    """Get numerables for each fold."""
-    df = pd.DataFrame(columns=("fold", "knn_metric", *NUMERABLE_METRICS_LIST))
-
-    loc_i = 0
-    for knn_metric in OPTIONS_METRICS:
-        for fold in range(DEFAULT_FOLDS):
-            df.loc[loc_i] = {
-                "fold":fold,
-                "knn_metric": knn_metric,
-                **{metric:metrics[knn_metric]["per_fold"][fold][metric]  for metric in NUMERABLE_METRICS_LIST}
-            }
-            loc_i += 1
-
-    return df
-
-def roc_to_df_for_overall(metrics:ModelOutputMetrics) -> pd.DataFrame:
-    """Create a df for plotting roc-auc for overall."""
-    df = None
-    for knn_metric in OPTIONS_METRICS:
-        
-        inter_metric_df = None
-        for col in ["auc", "fpr", "tpr"]:
-            data = metrics[knn_metric]["overall"][col]
-            tmp_df = pd.DataFrame({
-                "class":list(data.keys()),
-                col: list(data.values())
-            })
-            tmp_df["metric"] = knn_metric
-
-            if inter_metric_df is None:
-                inter_metric_df = tmp_df.copy()
-                continue
-            
-            inter_metric_df = pd.merge(inter_metric_df, tmp_df, on="class")
-        
-        if df is None:
-            df = inter_metric_df.copy()
-            continue
-
-        df = pd.concat([df, inter_metric_df], ignore_index=True)
-    
-    
-    df = df.explode(["fpr", "tpr"])
-    df["fpr"] = pd.to_numeric(df["fpr"], errors="coerce")
-    df["tpr"] = pd.to_numeric(df["tpr"], errors="coerce")
-
-    df = df.dropna()
-    df = df.sort_values(["class", "fpr"])
-
-    return df
-
-def roc_to_df_for_mean(metrics:ModelOutputMetrics) -> pd.DataFrame:
-    """Create a df for plotting roc-auc per fold mean."""
-
-    df = None
-
-    for knn_metric in OPTIONS_METRICS:
-        data = metrics[knn_metric]["mean_roc"]
-        fpr = metrics[knn_metric]["fprs_grid"]
-        tmp = pd.DataFrame({
-            "class": list(data.keys()),
-            "auc": [value["auc"] for value in data.values()],
-            "tpr":[value["tpr"] for value in data.values()],
-            "fpr": [fpr  for _ in data.values()],
-        })
-        tmp["metric"] = knn_metric
-
-        if df is None:
-            df=tmp.copy()
-            continue
-
-        df = pd.concat([df,tmp],ignore_index=True)
-            
-    
-    df = df.explode(["fpr", "tpr"])
-    df["fpr"] = pd.to_numeric(df["fpr"], errors="coerce")
-    df["tpr"] = pd.to_numeric(df["tpr"], errors="coerce")
-    df = df.dropna()
-    df = df.sort_values(["class", "fpr"])
-    return df
-
-
 
 if __name__ == "__main__":
     st.image(BANNER_IMAGE)
@@ -185,19 +93,22 @@ if __name__ == "__main__":
                 st.write("Creating DataFrame..")
                 df = generate_df(dataset)
                 sorted_syndromes = list(df.syndrome.sort_values(ascending=True).unique())
+                
+                st.write("Parsing embeddings..")            
+                embeddings_array = generate_array_from_embeddings(dataset,df)
+
+                st.write("Under Sampling...")
+                syndromes_undersampled, embeddings_undersampled = under_sample(embeddings_array, df.syndrome)
 
                 st.write("Retrieving statistics..")            
                 statistics = get_overall_statistics(df)
+                joined_for_comparison_under_raw = join_under_sampled_and_raw_for_comparison(syndromes_undersampled, df)
 
                 grouped_amount_of_images = df.groupby("syndrome").count()["image"].sort_values(ascending=True).reset_index()
                 grouped_amount_of_subjects = df.groupby("syndrome")["subject"].nunique().sort_values(ascending=True).reset_index()
                 grouped_statistics = pd.merge(grouped_amount_of_images, grouped_amount_of_subjects, on="syndrome")
                 
                 grouped_images_per_subject = df.groupby(["syndrome", "subject"])["image"].count().sort_values(ascending=True).reset_index()
-
-
-                st.write("Parsing embeddings..")            
-                embeddings_array = generate_array_from_embeddings(dataset,df)
 
                 # plot data
                 st.write("Reducing embeddings dimensions..")            
@@ -209,16 +120,21 @@ if __name__ == "__main__":
                         learning_rate=DEFAULT_LEARNING_RATE if not "learning_rate" in st.session_state else st.session_state["learning_rate"],
                         init=DEFAULT_INIT if not "init" in st.session_state else st.session_state["init"],
                     )
-                x_data = tsne_data[:,0]
-                y_data = tsne_data[:,1]
                 plot_data = pd.DataFrame({
-                    "x": x_data,
-                    "y": y_data,
+                    "x": tsne_data[:,0],
+                    "y": tsne_data[:,1],
                     "label": df.syndrome
+                })
+
+                tsne_data_under_sampled = generate_default_t_sne(embeddings_undersampled)
+                plot_data_undersampled = pd.DataFrame({
+                    "x": tsne_data_under_sampled[:,0],
+                    "y": tsne_data_under_sampled[:,1],
+                    "label": syndromes_undersampled
                 })
             
                 st.write("Creating model..")            
-                model = Model(embeddings_array,df.syndrome)
+                model = Model(embeddings_undersampled, syndromes_undersampled)
                 train_size, test_size, train_syndromes, test_syndromes = model.train_test_size
 
                 st.write("Finding best parameters for KNN..")            
@@ -258,7 +174,7 @@ if __name__ == "__main__":
         with tab1:
 
             # -------------SHOW DF---------------------------
-            st.header("Data Analysis and visualization", divider=True)
+            st.header("Raw Data Analysis and visualization", divider=True)
             st.dataframe(df)
             st.caption("Extracted data from dataset pickle file. This dataframe holds the main characteristics from images and their classes.")
 
@@ -355,6 +271,52 @@ if __name__ == "__main__":
                 st.slider("Exaggeration", MIN_EXAGGERATION, MAX_EXAGGERATION, DEFAULT_EXAGGERATION, key="exaggeration")
                 st.slider("Max Iter", MIN_MAX_ITER, MAX_MAX_ITER, DEFAULT_MAX_ITER, key="max_iter")
                 st.slider("Learning Rate", MIN_LEARNING_RATE, MAX_LEARNING_RATE, DEFAULT_LEARNING_RATE, key="learning_rate")
+
+            st.divider()
+
+            st.header("Under Sampled Data Analysis and visualization")
+
+            expander = st.expander("We under sampled the data - Click to Have More Info")
+            expander.write('''
+                Since the data may be imbalanced for some labels, I'm using the under sampled
+                dataset to avoid Overfitting. That's the data we're using for training.
+                           
+                For this task, the RepeatedEditedNearestNeighbours algorithm is used, check more
+                about it at: https://imbalanced-learn.org/stable/references/generated/imblearn.under_sampling.RepeatedEditedNearestNeighbours.html
+            ''')
+
+            st.space(size="small")
+
+            fig = px.line(
+                    joined_for_comparison_under_raw,
+                    x="syndrome",
+                    y="count",
+                    color="type",
+                    title="Comparison Amount Images per Syndrome - Raw x Under Sampled",
+                    markers=True,
+                    labels={
+                        "type":"Data Type",
+                        "syndrome":"Syndrome",
+                        "count":"Amount"
+                    }
+                )
+            fig.update_xaxes(type="category")
+            st.plotly_chart(fig)
+
+
+            fig = px.scatter(
+                        plot_data_undersampled,
+                        x="x",
+                        y="y",
+                        color="label",
+                        hover_name="label",
+                        title="T-SNE for undersampled data"
+                    )
+            fig.update_xaxes(showticklabels=False, visible=False)
+            fig.update_yaxes(showticklabels=False, visible=False)
+            st.plotly_chart(fig)
+
+
 
         with tab2:
             total_metrics = len(OPTIONS_METRICS)
